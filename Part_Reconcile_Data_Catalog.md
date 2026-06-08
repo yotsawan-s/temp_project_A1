@@ -179,6 +179,37 @@
 
 > Default ที่ตั้งไว้ในเครื่องมือ — **ช่องที่มี ⚠️ = รอผู้ใช้ยืนยัน**
 
+### D.0 กระบวนการ Mapping มาตรฐาน 4 Step (ต่อคู่ Main File ⇄ Map File)
+
+> แต่ละ Set ทำงาน **ทีละคู่**: `Main File (Source#1)` เทียบกับ `Map File #1..#n` (Source ถัด ๆ ไป)
+> ทุกคู่เดินตาม 4 Step นี้ (ดูชีท `Mapping_Steps` ในไฟล์ Excel)
+
+```
+              (Main File)              >        (Map File) #k
+               2_D002                            1_A003
+   ┌─────────────────────────────┬───────────────────────────────┐
+Step1  Filter:                    │  Filter:
+       Date                       │     DEPT_CODE, System ID, Date
+   ├─────────────────────────────┼───────────────────────────────┤
+Step2  Key Map:                   │  Key Map:
+       Ref. + อื่นๆ               │     Ref. + อื่นๆ
+   ├─────────────────────────────┼───────────────────────────────┤
+Step3  Reconcile:                 │  Reconcile:
+       Date, CCY, Amount + อื่นๆ  │     Date, CCY, Amount + อื่นๆ
+   ├─────────────────────────────┼───────────────────────────────┤
+Step4  Result: Reconcile          │  Return: Reconcile  → เขียนผล/ERROR กลับไฟล์ 1_Bxxx
+   └─────────────────────────────┴───────────────────────────────┘
+```
+
+| Step | ความหมาย | ที่มาของข้อมูล |
+|:--:|----------|----------------|
+| **1. Filter** | กรองแถวให้อยู่ในขอบเขต (วันที่/Dept/System/Type/Status) — *แต่ละไฟล์มีตัวกรองของตัวเอง* | `Col. Filter (Y)` ใน 3_DataSource |
+| **2. Key Map** | สร้าง Match Key (`Ref. + อื่นๆ`) พร้อม **Key Prep** ถ้าจำเป็น | `Col. Key Mapping (Y)` + Key Prep DSL |
+| **3. Reconcile** | เทียบ `Date + CCY + Amount + อื่นๆ` **หลัง Normalize** (มุม MISSING/EXTRA/MISMATCH) | Compare Fields + `Field_Format` |
+| **4. Result / Return** | ฝั่ง **Main** = `Result: Reconcile` ; ฝั่ง **Map** = `Return: Reconcile` → เขียน ERROR กลับ `1_Bxxx` | ไฟล์ผลลัพธ์ 1_B |
+
+> 🔁 **กรณี chain 3-4 ขั้น** (Pattern 3): Main จะจับคู่กับ Map #1, #2, #3 ตามลำดับ — เช่น `D2-5` = `2_D002 ⇄ 1_A003 (#1)` แล้ว `2_D002 ⇄ 2_D001 (#2, back-check)`
+
 ### D.1 Match Pattern — 3 แบบ
 | แบบ | ชื่อ | คำอธิบาย |
 |:--:|------|----------|

@@ -44,6 +44,17 @@ datemap={'3_O001':'Arrangement Contract Date','1_A007':'Data Set Date','1_A005':
 '1_A004':'Data Set Date','1_A006':'Data Set Date','2_D004':'(none)','2_D005':'(none)','2_D003':'Date'}
 for b in ['1_B001','1_B002','1_B003','1_B004','1_B005','1_B006','1_B007','1_B008','1_B009']: datemap[b]='(none)'
 
+# Col.Filter (Y) per source — used in Step1 Filter (from 3_DataSource)
+filtermap={'2_D001':['PRODUCT_TYPE','TRADE_DATE'],'2_D002':['Data Set Date'],
+'2_D003':['Date','CP Name','Type','Settle/Unsettle'],'2_D004':[],'2_D005':[],
+'3_O001':['Arrangement Contract Date'],'3_O002':['Expired/Exercised'],'3_O003':['CompositeOptSeqNum','Date'],
+'4_C001':[],'4_C002':['Settlement Date','Class','Ccy'],'4_C003':['Settlement Date','Status'],
+'1_A001':['DEPT CODE','System ID','Data Set Date'],'1_A002':['DEPT CODE','Data Set Date'],
+'1_A003':['Data Set Date'],'1_A004':['Dept Code','Data Set Date'],'1_A005':['DEPT CODE','System Id','Data Set Date'],
+'1_A006':['Dept Code','Data Set Date'],'1_A007':['Dept Code','System Id','Data Set Date'],
+'1_A008':['Dept Code','System Id','Data Set Date'],'1_A009':['Data Set Date']}
+for b in ['1_B001','1_B002','1_B003','1_B004','1_B005','1_B006','1_B007','1_B008','1_B009']: filtermap[b]=['Department Code']
+
 # (product,cat,set_no,chain,transmap,pattern,matchkey,compare,condition,backcheck)
 P1,P2,P3="1 Direct","2 Direct+Cond","3 Map+Back-check"
 sets=[
@@ -87,6 +98,10 @@ line("    • มุม1  A1→DB : มีใน A1 แต่ไม่มีใ�
 line("    • มุม2  DB→A1 : มีใน Database แต่ไม่มีใน A1 = MISSING in A1 (บันทึกขาด)")
 line("    • Key ตรงกันทั้งคู่ → เทียบ Compare Fields (CCY + Amount + Date) ถ้าต่าง = AMOUNT/VALUE MISMATCH")
 line("    • ไม่รวมยอด (no SUM) — จับคู่รายบรรทัดด้วย Match Key | ผลลัพธ์ ERROR ผูกกับ Key → นำกลับไปแก้ที่ A1_System (ไฟล์ 1_Bxxx)")
+r+=1
+line("1.5)  กระบวนการ Mapping มาตรฐาน 4 Step (ต่อคู่ Main ⇄ Map File — ดูชีท Mapping_Steps)",b=True,sz=12,color=NAVY)
+line("    Step1 Filter (กรองแถว) → Step2 Key Map (สร้างคีย์ Ref+อื่นๆ) → Step3 Reconcile (เทียบ Date/CCY/Amount) → Step4 Result(Main)/Return(Map→1_B)")
+line("    แต่ละ Set = Main (Source#1) เทียบกับ Map File #1..#n ทีละคู่")
 r+=1
 line("2)  Match Patterns 3 แบบ (กำหนดต่อ Set ในชีท Recon_Rules)",b=True,sz=12,color=NAVY)
 line("    แบบ 1  Direct map         : จับคู่ตรงด้วย Match Key แล้วเทียบ Compare Fields")
@@ -196,6 +211,43 @@ ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=13)
 st(ws.cell(r,1,'Key Prep DSL:  AS_IS | LEFT(n) | RIGHT(n) | MID(start,len) | AFTER("x") | BEFORE("x") | REGEX("pattern") | CONCAT(f1,f2)        '
                 'Pattern: 1 Direct / 2 Direct+Cond / 3 Map+Back-check'),b=True,sz=9,color=NAVY,fill=YELLOW,wrap=True)
 ws.row_dimensions[r].height=28
+
+# ============================================================ MAPPING STEPS (4-step process)
+ws=wb.create_sheet("Mapping_Steps")
+title(ws,"MAPPING STEPS  —  กระบวนการ Mapping มาตรฐาน 4 Step (ต่อคู่ Main File ⇄ Map File)",
+      "แต่ละ Set ทำทีละคู่: Main (Source#1) เทียบกับ Map File #1..#n  |  Step1 Filter → Step2 Key Map → Step3 Reconcile → Step4 Result(Main)/Return(Map)  |  ไฟล์ 1_Bxxx = ที่เขียนผล Return",8)
+ws.sheet_view.showGridLines=False
+STP="DDEBF7"
+hdr(ws,4,["Set ID","Pairing  (Main ⇄ Map #k)","Step1 Filter — Main","Step1 Filter — Map",
+          "Step2 Key Map — Main","Step2 Key Map — Map","Step3 Reconcile (หลัง Normalize)","Step4 Result → Return (Output)"])
+ws.freeze_panes="C5"
+r=5
+for p,cat,no,chain,tm,pat,mk,cmp,cond,bc in sets:
+    sid=f"{cat}-{no}"
+    main=chain[0]
+    outs=[x for x in chain if x.startswith("1_B")]
+    out=outs[0] if outs else "(compare only)"
+    maps=[x for x in chain[1:] if not x.startswith("1_B")]
+    for k,mp in enumerate(maps,1):
+        f_main=", ".join(filtermap.get(main,[])) or "-"
+        f_map=", ".join(filtermap.get(mp,[])) or "-"
+        recon="Date + CCY + Amount + อื่นๆ"
+        result=f"Result(Main) / Return → {out}"
+        row=[sid,f"{main} ⇄ {mp}  (#{k})",f_main,f_map,keymap.get(main,""),keymap.get(mp,""),recon,result]
+        for i,v in enumerate(row): st(ws.cell(r,i+1,v),bd=True,sz=9,h="center" if i==0 else "left")
+        st(ws.cell(r,1),b=True,fill=GREY,h="center"); st(ws.cell(r,2),b=True)
+        for col in (3,4): ws.cell(r,col).fill=PatternFill("solid",fgColor=STP)
+        for col in (5,6): ws.cell(r,col).fill=PatternFill("solid",fgColor="FCE4D6")
+        st(ws.cell(r,7),fill="E2EFDA"); st(ws.cell(r,8),fill=GREEN,sz=9,bd=True)
+        r+=1
+mlast=r-1
+for i,w in enumerate([9,26,26,28,22,22,24,30]): ws.column_dimensions[get_column_letter(i+1)].width=w
+r+=1
+ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=8)
+st(ws.cell(r,1,'Step1 Filter = กรองแถวในขอบเขต (วันที่/Dept/System/Type/Status)  •  Step2 Key Map = สร้างคีย์ (Ref + อื่นๆ) พร้อม Key Prep  •  '
+              'Step3 Reconcile = เทียบ Date+CCY+Amount(+อื่นๆ) หลัง Normalize (ดู Field_Format)  •  '
+              'Step4 = ฝั่ง Main ได้ "Result: Reconcile", ฝั่ง Map เขียน "Return: Reconcile" (ERROR Message) กลับไฟล์ 1_Bxxx'),
+   b=True,sz=9,color=NAVY,fill=YELLOW,wrap=True); ws.row_dimensions[r].height=46
 
 # ============================================================ SAMPLE DATA
 ws=wb.create_sheet("Sample_Data")
@@ -392,7 +444,7 @@ for n,q,a,col in qs:
     st(ws.cell(r,2,n),b=True,bd=True,h="center"); st(ws.cell(r,3,q),wrap=True,bd=True,sz=9)
     st(ws.cell(r,4,a),wrap=True,bd=True,sz=9,fill=col); ws.row_dimensions[r].height=42; r+=1
 
-order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Recon_Detail","Sample_Data","Field_Format","Map_Config","Source_Config","Open_Questions"]
+order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Mapping_Steps","Recon_Detail","Sample_Data","Field_Format","Map_Config","Source_Config","Open_Questions"]
 wb._sheets.sort(key=lambda s: order_sheets.index(s.title))
 wb.calculation.fullCalcOnLoad=True
 wb.save("Part_Reconcile_Tool_Prototype.xlsx")

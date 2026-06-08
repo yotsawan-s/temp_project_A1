@@ -14,7 +14,8 @@
 3. [หมวด B — Product & Category (Flow Map)](#หมวด-b--product--category-flow-map)
 4. [หมวด C — Data Source (Field ที่ใช้)](#หมวด-c--data-source-field-ที่ใช้)
 5. [หมวด D — Reconcile Rules (กฎการจับคู่)](#หมวด-d--reconcile-rules-กฎการจับคู่)
-6. [หมวด E — มาตรฐานคำศัพท์ & DSL](#หมวด-e--มาตรฐานคำศัพท์--dsl)
+6. [หมวด E — Normalization (Date & Number)](#หมวด-e--normalization-date--number)
+7. [หมวด F — มาตรฐานคำศัพท์ & DSL](#หมวด-f--มาตรฐานคำศัพท์--dsl)
 
 ---
 
@@ -217,9 +218,79 @@
 
 ---
 
-## หมวด E — มาตรฐานคำศัพท์ & DSL
+## หมวด E — Normalization (Date & Number)
 
-### E.1 Key Prep DSL (เตรียมคีย์ก่อน mapping)
+> **ปัญหา:** แต่ละ Source เก็บ Date/Number คนละ format → เทียบตรง ๆ ไม่ได้
+> **หลักการ:** ก่อนเทียบทุกครั้ง Engine ต้อง **Normalize ค่าดิบ → canonical** ก่อน แล้วจึงเปรียบเทียบ
+> กำหนดต่อ (Source, Field) ในชีท **`Field_Format`** ของไฟล์ Excel
+
+### E.1 มาตรฐานของ Tool (Canonical)
+
+| ชนิด | ภายใน (canonical) | แสดงผลใน Tool |
+|------|-------------------|----------------|
+| **Date** | ISO `yyyy-mm-dd` (เทียบแบบ string เรียงได้) | **`dd/mm/yyyy`** |
+| **Number** | ตัวเลขล้วน (จัดการเครื่องหมาย/คั่นหลักพันแล้ว) | `#,##0` |
+| **Currency** | รหัส 3 ตัวพิมพ์ใหญ่ (เช่น `USD`) | เหมือนกัน |
+
+### E.2 Date — รูปแบบที่พบ & การแปลง
+
+| Source Format token | ตัวอย่างค่าดิบ | → canonical ISO | สูตร Excel (ตัวอย่าง) |
+|---------------------|----------------|------------------|------------------------|
+| `DATE` | (serial วันที่จริง) | `2026-05-30` | `=TEXT(cell,"yyyy-mm-dd")` |
+| `NUMBER:yyyymmdd` | `20260530` | `2026-05-30` | `=TEXT(DATE(INT(c/10000),INT(MOD(c,10000)/100),MOD(c,100)),"yyyy-mm-dd")` |
+| `NUMBER:ddmmyyyy` | `30052026` | `2026-05-30` | แยก d/m/y จากตำแหน่งตัวเลข |
+| `TEXT:dd/mm/yyyy` | `"30/05/2026"` | `2026-05-30` | `=TEXT(DATE(VALUE(RIGHT(t,4)),VALUE(MID(t,4,2)),VALUE(LEFT(t,2))),"yyyy-mm-dd")` |
+| `TEXT:mm/dd/yyyy` | `"05/30/2026"` | `2026-05-30` | สลับตำแหน่ง d/m |
+| `TEXT:yyyy-mm-dd` | `"2026-05-30"` | `2026-05-30` | ใช้ได้เลย |
+| `TEXT:dd-mmm-yy` | `"30-May-26"` | `2026-05-30` | map ชื่อเดือน + pivot ปี (ดู E.4) |
+| `TEXT:dd-mmm-yyyy` | `"30-May-2026"` | `2026-05-30` | map ชื่อเดือน |
+
+> 💡 หลัง normalize เป็น ISO แล้ว การเทียบ "ตรง/ไม่ตรง" ใช้เทียบ string ได้ทันที และแสดงผลกลับเป็น `dd/mm/yyyy`
+
+### E.3 Number — เครื่องหมาย & รูปแบบ
+
+| Normalization token | ความหมาย | ตัวอย่าง | สูตร Excel (ตัวอย่าง) |
+|---------------------|----------|----------|------------------------|
+| `RAW` | ใช้ค่าดิบ | `100` → `100` | `=c` |
+| `ABS` | **ตัดเครื่องหมายลบ** (เทียบเฉพาะขนาด) | `-100` → `100` | `=ABS(c)` |
+| `NEG` | บังคับเป็นลบ | `100` → `-100` | `=-ABS(c)` |
+| `SIGN_BY("fld",map)` | sign มาจากคอลัมน์อื่น | `100` + `CR` → `-100` | `=c*IF(flag="CR",-1,1)` |
+| `PAREN_NEG` | วงเล็บ = ค่าลบ | `"(100)"` → `-100` | `=IF(LEFT(t,1)="(",-VALUE(MID(t,2,LEN(t)-2)),VALUE(t))` |
+| `TRAIL_NEG` | เครื่องหมายท้าย | `"100-"` → `-100` | `=IF(RIGHT(t,1)="-",-VALUE(LEFT(t,LEN(t)-1)),VALUE(t))` |
+| `STRIP("chars")` | ตัดคั่นหลักพัน/สัญลักษณ์ | `"1,000.00"` → `1000` | `=VALUE(SUBSTITUTE(SUBSTITUTE(t,",",""),"$",""))` |
+| `DEC(n)` / `ROUND(n)` | ปัดทศนิยม n ตำแหน่ง (กัน floating) | `99.999` → `100.00` | `=ROUND(c,n)` |
+
+> ⭐ กรณีที่ถาม **"100 = -100 ต้องเอาเครื่องหมายลบออกก่อน"** → ใช้ `ABS` ทั้งสองฝั่งก่อนเทียบ
+> ถ้าทิศทางเงิน (รับ/จ่าย) มีความหมาย → ใช้ `SIGN_BY("Pay/Rcv" / "DR/CR" / "B/S")` แทนการตัดทิ้ง
+
+### E.4 ข้อควรระวัง (Edge cases)
+- **ปี 2 หลัก (`yy`)**: ต้องมี pivot — เช่น `yy < 50` → `20yy`, มิฉะนั้น `19yy` (กำหนดได้)
+- **ชื่อเดือน (`mmm`)**: ค่าเริ่มต้นเป็นอังกฤษ `Jan..Dec` → ต้องมีตารางแปลง; ระวังถ้าไฟล์เป็นเดือนไทย
+- **วันที่เป็น 0/ว่าง/`0000-00-00`**: ถือเป็น null → ไม่นำมาเทียบ (หรือ flag เป็น error ตามต้องการ)
+- **ทศนิยม/ปัดเศษ**: ตั้ง `Amount tolerance` ใน Control_Panel ร่วมกับ `ROUND` เพื่อกันค่าต่างจาก floating point
+- **Currency**: normalize เป็นตัวพิมพ์ใหญ่ + trim ช่องว่าง ก่อนเทียบ
+
+### E.5 ลงรายละเอียดใน Field_Format อย่างไร (โครงสร้างที่แนะนำ)
+หนึ่งแถวต่อหนึ่ง **(Source, Field)** ที่ใช้จับคู่/เทียบ:
+
+| คอลัมน์ | ตัวอย่าง |
+|---------|----------|
+| Source | `2_D001` |
+| Field | `TRADE_DATE` |
+| Logical Role | `Date` / `Number` / `Currency` / `Key` |
+| **Source Format (raw)** ⚠️ | `NUMBER:yyyymmdd` |
+| **Normalization Rule** ⚠️ | `PARSE_DATE → ISO` หรือ `ABS` / `SIGN_BY(...)` |
+| Compare As (canonical) | `ISO yyyy-mm-dd` / `ตัวเลข ≥ 0` |
+| Example | `20260530 → 2026-05-30` |
+| Notes | หมายเหตุ/ที่ต้องยืนยัน |
+
+> ⚠️ คอลัมน์ **Source Format** และ **Normalization Rule** เป็นค่า default รอผู้ใช้ยืนยันต่อไฟล์จริง
+
+---
+
+## หมวด F — มาตรฐานคำศัพท์ & DSL
+
+### F.1 Key Prep DSL (เตรียมคีย์ก่อน mapping)
 | คำสั่ง | ความหมาย | ตัวอย่าง |
 |--------|----------|----------|
 | `AS_IS` | ใช้ค่าดิบ | `C0001` → `C0001` |
@@ -229,7 +300,7 @@
 | `REGEX("pattern")` | จับด้วย regex | `KT20260530C0001` → `REGEX("C\d+")` → `C0001` |
 | `CONCAT(f1,f2)` | รวมหลาย field | `Ref + CCY` |
 
-### E.2 สถานะผล (Status)
+### F.2 สถานะผล (Status)
 | สถานะ | สี | ความหมาย |
 |--------|----|----------|
 | `OK / Matched` | 🟢 เขียว | ตรงกันทุก field |
@@ -237,7 +308,7 @@
 | `EXTRA in A1` | 🔴 แดง | มีใน A1 ไม่มีใน DB → ตรวจ/ลบที่ A1 |
 | `VALUE MISMATCH` | 🟠 ส้ม | Key ตรง แต่ CCY/Amount/Date ต่าง → แก้ค่าที่ A1 |
 
-### E.3 อภิธานศัพท์
+### F.3 อภิธานศัพท์
 | คำ | ความหมาย |
 |----|----------|
 | **A1_System** | ระบบหลักที่บันทึก Transaction (ไฟล์ `1_A`/`1_B`) — ตัวที่ถูกตรวจ |
@@ -247,6 +318,8 @@
 | **Data Transaction Date** | วันที่ Transaction ที่ผู้ใช้ระบุเพื่อตรวจ (ตัวกรองหลัก) |
 | **Match Key** | คีย์ที่ใช้จับคู่ระหว่าง DB ↔ A1 |
 | **ERROR Message** | ข้อความผลการ Reconcile ที่นำกลับไปแก้ที่ A1 (เก็บในไฟล์ `1_B`) |
+| **Normalize** | แปลงค่าดิบ (Date/Number) ให้เป็น canonical ก่อนเทียบ (ดูหมวด E) |
+| **Canonical** | รูปแบบมาตรฐานภายใน: Date = ISO `yyyy-mm-dd`, Number = ตัวเลขล้วน |
 
 ---
 
@@ -254,7 +327,8 @@
 1. **Pattern/Compare ต่อ Set** (โดยเฉพาะที่ติด ⚠️) — โปรดยืนยัน/แก้
 2. **Key Prep rule จริงต่อ Source** — ต้องการรูปแบบคีย์ดิบจริงของไฟล์ที่ต้อง prep
 3. **Pattern 3 Back-check** — ระบุว่าย้อนไปตรวจ field ใดที่ Main Source
-4. **ข้อมูลตัวอย่างจริง** 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine ให้รันครบทุก Set
+4. **Date/Number Format ดิบจริงต่อ field** — ยืนยันใน `Field_Format` (Source Format + Normalization Rule) โดยเฉพาะวันที่แบบ `dd-mmm-yy` และเลขที่ sign มาจากคอลัมน์อื่น
+5. **ข้อมูลตัวอย่างจริง** 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine ให้รันครบทุก Set
 
 ---
 *สร้างจาก `MockUp_File.xlsx` — ใช้คู่กับ `Part_Reconcile_Tool_Prototype.xlsx`*

@@ -100,6 +100,11 @@ r+=1
 line("4)  Match Key forms (ฝั่ง n ไม่รวมยอด)",b=True,sz=12,color=NAVY)
 line("    Ref อย่างเดียว  |  Ref + CCY + Amount  |  Ref + Type + CCY + Amount   (เลือกต่อ Set)")
 r+=1
+line("4.5)  Normalize ค่า Date & Number ก่อนเทียบ (ชีท Field_Format)",b=True,sz=12,color=NAVY)
+line("    • Date: แต่ละ Source อาจเก็บคนละ format (DATE / NUMBER:yyyymmdd / TEXT:dd/mm/yyyy / TEXT:dd-mmm-yy ฯลฯ)")
+line("            → Engine แปลงเป็น canonical ISO (yyyy-mm-dd) ก่อนเทียบ, Tool แสดงผลเป็น dd/mm/yyyy")
+line('    • Number: ตัดเครื่องหมาย/แปลง sign ก่อนเทียบ เช่น -100 → ABS=100 , หรือ SIGN_BY("DR/CR") , "(100)"→-100')
+r+=1
 line("5)  วิธีใช้",b=True,sz=12,color=NAVY)
 line("    Control_Panel (กรอกเหลือง) → Recon_Rules (กำหนด logic ต่อ Set) → Sample_Data (จำลอง) → Recon_Detail (ผลรายบรรทัด) → Recon_Summary (Dashboard 21 Sets)")
 r+=1
@@ -194,47 +199,58 @@ ws.row_dimensions[r].height=28
 
 # ============================================================ SAMPLE DATA
 ws=wb.create_sheet("Sample_Data")
-title(ws,"SAMPLE DATA  —  ข้อมูลจำลอง Set D1-1  (2_D001  ⇄  1_A009, Pattern 1 + Key Prep)",
-      "สาธิตการคำนวณสด: A1 มีคีย์ดิบแบบ KT…Cxxxx ต้อง Prep → Cxxxx ก่อนจับคู่ | เทียบ CCY+Amount+Date | จับคู่รายบรรทัด ไม่รวมยอด",10)
+title(ws,"SAMPLE DATA  —  Set D1-1 (2_D001 ⇄ 1_A009): Key Prep + Date/Number Normalization",
+      "DB เก็บวันที่เป็น NUMBER(yyyymmdd) | A1 เก็บเป็น TEXT(dd/mm/yyyy) | จำนวนเงินมีเครื่องหมายลบต่างกัน → ต้อง Normalize ก่อนเทียบ | คอลัมน์เขียว = ค่าหลัง Normalize (canonical ISO / ABS)",13)
 ws.sheet_view.showGridLines=False
-# DB table
-st(ws.cell(4,2,"ตาราง A : Database 2_D001  (กรอง TRADE_DATE=ChkDate, PRODUCT_TYPE)"),b=True,color=WHITE,fill="538135"); ws.merge_cells("B4:E4")
-hdr(ws,5,["TRADE_REF (Key)","CCY","Amount","TRADE_DATE"],start=2,fill="A9D08E",color="000000")
-db_rows=[("C0001","USD",1000000,"2026-05-30"),("C0002","USD",2000000,"2026-05-30"),
-         ("C0003","EUR",1500000,"2026-05-30"),("C0004","JPY",3000000,"2026-05-30")]
+# DB table : date stored as NUMBER yyyymmdd, amount may carry sign
+st(ws.cell(4,2,"ตาราง A : Database 2_D001  (TRADE_DATE = NUMBER yyyymmdd)"),b=True,color=WHITE,fill="538135"); ws.merge_cells("B4:G4")
+hdr(ws,5,["TRADE_REF (Key)","CCY","Amount (raw)","TRADE_DATE (raw)","Norm Amt (ABS)","Norm Date (ISO)"],start=2,fill="A9D08E",color="000000")
+# (key, ccy, amount_raw, date_raw_num)
+db_rows=[("C0001","USD",1000000,20260530),("C0002","USD",2000000,20260530),
+         ("C0003","EUR",1500000,20260530),("C0004","JPY",3000000,20260530)]
 r=6
 for k,c,a,d in db_rows:
     st(ws.cell(r,2,k),bd=True); st(ws.cell(r,3,c),bd=True,h="center")
     cc=ws.cell(r,4,a); st(cc,bd=True,h="right"); cc.number_format="#,##0"
-    st(ws.cell(r,5,d),bd=True,h="center"); r+=1
+    st(ws.cell(r,5,d),bd=True,h="center")
+    ws.cell(r,6,f'=ABS(D{r})'); st(ws.cell(r,6),bd=True,h="right",fill=GREEN,b=True); ws.cell(r,6).number_format="#,##0"
+    ws.cell(r,7,f'=TEXT(DATE(INT(E{r}/10000),INT(MOD(E{r},10000)/100),MOD(E{r},100)),"yyyy-mm-dd")')
+    st(ws.cell(r,7),bd=True,h="center",fill=GREEN,b=True)
+    r+=1
 db_last=r-1
-# A1 table with raw key + prepped key (formula)
-st(ws.cell(4,7,"ตาราง B : A1_System 1_A009  (กรอง Data Set Date=ChkDate, Dept) — คอลัมน์ K = Prepped Key"),b=True,color=WHITE,fill="2E75B6"); ws.merge_cells("G4:K4")
-hdr(ws,5,["Raw Key (ดิบ)","CCY","Amount","Data Set Date","Prepped Key →"],start=7,fill="9DC3E6",color="000000")
-a1_rows=[("KT20260530C0001","USD",1000000,"2026-05-30"),("KT20260530C0002","USD",2050000,"2026-05-30"),
-         ("KT20260530C0003","EUR",1500000,"2026-05-29"),("KT20260530C0005","GBP",800000,"2026-05-30")]
+# A1 table : raw key needs prep, date stored as TEXT dd/mm/yyyy, amount sign differs
+st(ws.cell(4,9,"ตาราง B : A1_System 1_A009  (Data Set Date = TEXT dd/mm/yyyy) — คอลัมน์เขียว = Prep/Normalize"),b=True,color=WHITE,fill="2E75B6"); ws.merge_cells("I4:O4")
+hdr(ws,5,["Raw Key","CCY","Amount (raw)","Date (raw text)","Prepped Key","Norm Amt (ABS)","Norm Date (ISO)"],start=9,fill="9DC3E6",color="000000")
+# (raw_key, ccy, amount_raw, date_raw_text)  — note signs & formats differ from DB
+a1_rows=[("KT20260530C0001","USD",-1000000,"30/05/2026"),  # sign- & date-format differ -> still OK after normalize
+         ("KT20260530C0002","USD", 2050000,"30/05/2026"),  # amount truly differs -> MISMATCH
+         ("KT20260530C0003","EUR", 1500000,"29/05/2026"),  # date truly differs -> MISMATCH
+         ("KT20260530C0005","GBP",  800000,"30/05/2026")]  # extra
 r=6
 for k,c,a,d in a1_rows:
-    st(ws.cell(r,7,k),bd=True); st(ws.cell(r,8,c),bd=True,h="center")
-    cc=ws.cell(r,9,a); st(cc,bd=True,h="right"); cc.number_format="#,##0"
-    st(ws.cell(r,10,d),bd=True,h="center")
-    # Key Prep: AFTER 'C' keeping the C  => MID(raw,FIND("C",raw),100)
-    ws.cell(r,11,f'=MID(G{r},FIND("C",G{r}),100)'); st(ws.cell(r,11),bd=True,h="center",fill=GREEN,b=True)
+    st(ws.cell(r,9,k),bd=True); st(ws.cell(r,10,c),bd=True,h="center")
+    cc=ws.cell(r,11,a); st(cc,bd=True,h="right"); cc.number_format="#,##0;(#,##0)"
+    st(ws.cell(r,12,d),bd=True,h="center")
+    ws.cell(r,13,f'=MID(I{r},FIND("C",I{r}),100)'); st(ws.cell(r,13),bd=True,h="center",fill=GREEN,b=True)          # Key Prep
+    ws.cell(r,14,f'=ABS(K{r})'); st(ws.cell(r,14),bd=True,h="right",fill=GREEN,b=True); ws.cell(r,14).number_format="#,##0"  # ABS
+    ws.cell(r,15,f'=TEXT(DATE(VALUE(RIGHT(L{r},4)),VALUE(MID(L{r},4,2)),VALUE(LEFT(L{r},2))),"yyyy-mm-dd")')         # parse text date
+    st(ws.cell(r,15),bd=True,h="center",fill=GREEN,b=True)
     r+=1
 a1_last=r-1
-note=('ข้อมูลจำลอง: C0001 ตรงทุกอย่าง=OK | C0002 Amount ไม่ตรง=MISMATCH | C0003 Date ไม่ตรง=MISMATCH | '
-      'C0004 มีใน DB ไม่มีใน A1=MISSING | C0005 มีใน A1 ไม่มีใน DB=EXTRA')
-ws.merge_cells("B12:K13"); st(ws.cell(12,2,note),wrap=True,color="9C5700",fill=YELLOW,bd=True)
-for col,w in zip("BCDEFGHIJK",[16,8,14,14,3,18,8,14,14,14]): ws.column_dimensions[col].width=w
-DBK=f"Sample_Data!$B$6:$B${db_last}"; DBC=f"Sample_Data!$C$6:$C${db_last}"; DBA=f"Sample_Data!$D$6:$D${db_last}"; DBD=f"Sample_Data!$E$6:$E${db_last}"
-A1K=f"Sample_Data!$K$6:$K${a1_last}"; A1C=f"Sample_Data!$H$6:$H${a1_last}"; A1A=f"Sample_Data!$I$6:$I${a1_last}"; A1D=f"Sample_Data!$J$6:$J${a1_last}"
+note=('Normalize ก่อนเทียบ:  C0001 = OK (DB amt 1,000,000 vs A1 -1,000,000 → ABS ตรง; วันที่คนละ format → ISO ตรง)  |  '
+      'C0002 = MISMATCH(Amount จริง)  |  C0003 = MISMATCH(Date จริง 29 vs 30)  |  C0004 = MISSING in A1  |  C0005 = EXTRA in A1')
+ws.merge_cells("B12:O13"); st(ws.cell(12,2,note),wrap=True,color="9C5700",fill=YELLOW,bd=True)
+for col,w in zip("BCDEFGHIJKLMNO",[15,7,13,14,13,13,3,16,7,13,13,11,13,13]): ws.column_dimensions[col].width=w
+# canonical ranges used by Recon_Detail (compare on NORMALIZED columns)
+DBK=f"Sample_Data!$B$6:$B${db_last}"; DBC=f"Sample_Data!$C$6:$C${db_last}"; DBA=f"Sample_Data!$F$6:$F${db_last}"; DBD=f"Sample_Data!$G$6:$G${db_last}"
+A1K=f"Sample_Data!$M$6:$M${a1_last}"; A1C=f"Sample_Data!$J$6:$J${a1_last}"; A1A=f"Sample_Data!$N$6:$N${a1_last}"; A1D=f"Sample_Data!$O$6:$O${a1_last}"
 
 # ============================================================ RECON DETAIL
 ws=wb.create_sheet("Recon_Detail")
-title(ws,"RECON DETAIL  —  ผลรายบรรทัด Set D1-1 (Pattern 1)  | จับคู่ด้วย Prepped Key, เทียบ CCY+Amount+Date",
-      "สูตรคำนวณสดจาก Sample_Data | Field Diff บอกว่า field ใดไม่ตรง | ERROR Message = ข้อความนำกลับไปแก้ที่ A1_System (ผูกไฟล์ 1_B009)",12)
+title(ws,"RECON DETAIL  —  Set D1-1 (Pattern 1) | จับคู่ Prepped Key, เทียบค่าหลัง Normalize (CCY + Amount(ABS) + Date(ISO))",
+      "ค่า Amount/Date ที่แสดง = หลัง Normalize แล้ว (Amount=ABS, Date=dd/mm/yyyy มาตรฐาน Tool) | Field Diff บอก field ที่ไม่ตรงจริง | ERROR Message → นำกลับไปแก้ที่ A1_System (ไฟล์ 1_B009)",12)
 ws.sheet_view.showGridLines=False
-hdr(ws,5,["Match Key","In DB?","In A1?","DB CCY","A1 CCY","DB Amount","A1 Amount","DB Date","A1 Date","Field Diff","Result / Status","ERROR Message (→ fix in A1_System)"])
+hdr(ws,5,["Match Key","In DB?","In A1?","DB CCY","A1 CCY","DB Amount (norm)","A1 Amount (norm)","DB Date (dd/mm/yyyy)","A1 Date (dd/mm/yyyy)","Field Diff","Result / Status","ERROR Message (→ fix in A1_System)"])
 ws.freeze_panes="B6"
 union=["C0001","C0002","C0003","C0004","C0005"]
 r=6
@@ -247,8 +263,8 @@ for k in union:
     ws.cell(R,5,f'=IFERROR(INDEX({A1C},MATCH(A{R},{A1K},0)),"")')
     ws.cell(R,6,f'=IFERROR(INDEX({DBA},MATCH(A{R},{DBK},0)),"")')
     ws.cell(R,7,f'=IFERROR(INDEX({A1A},MATCH(A{R},{A1K},0)),"")')
-    ws.cell(R,8,f'=IFERROR(INDEX({DBD},MATCH(A{R},{DBK},0)),"")')
-    ws.cell(R,9,f'=IFERROR(INDEX({A1D},MATCH(A{R},{A1K},0)),"")')
+    ws.cell(R,8,f'=IFERROR(TEXT(DATEVALUE(INDEX({DBD},MATCH(A{R},{DBK},0))),"dd/mm/yyyy"),"")')
+    ws.cell(R,9,f'=IFERROR(TEXT(DATEVALUE(INDEX({A1D},MATCH(A{R},{A1K},0))),"dd/mm/yyyy"),"")')
     # field diff only meaningful when both present
     ws.cell(R,10,(f'=IF(AND(B{R}="YES",C{R}="YES"),TRIM(IF(D{R}<>E{R},"CCY ","")&IF(ABS(F{R}-G{R})>Tol,"Amount ","")&IF(H{R}<>I{R},"Date ","")),"")'))
     ws.cell(R,11,(f'=IF(AND(B{R}="YES",C{R}="NO"),"MISSING in A1",'
@@ -308,6 +324,53 @@ for s in order:
     r+=1
 for i,w in enumerate([20,16,24,30,15,26]): ws.column_dimensions[get_column_letter(i+1)].width=w
 
+# ============================================================ FIELD FORMAT (normalization map)
+ws=wb.create_sheet("Field_Format")
+title(ws,"FIELD FORMAT  —  แผนที่ Normalize ค่า Date & Number ต่อ (Source, Field)",
+      "Tool มาตรฐาน: Date = dd/mm/yyyy (internal canonical = ISO yyyy-mm-dd) | Number = ตัวเลขล้วน (ABS/แยกเครื่องหมาย) | Engine ต้อง Normalize ค่าให้เป็น canonical ก่อนเทียบทุกครั้ง  |  ช่องเหลือง = config โปรดยืนยัน, ⚠️ = ค่า default",8)
+ws.sheet_view.showGridLines=False
+hdr(ws,4,["Source","Field","Logical Role","Source Format (raw) ⚠️","Normalization Rule ⚠️","Compare As (canonical)","Example (raw → canonical)","Notes"])
+ws.freeze_panes="A5"
+# concrete date formats for demo sources; others default to confirm
+date_fmt_override={('2_D001','TRADE_DATE'):('NUMBER : yyyymmdd','PARSE_DATE → ISO','20260530 → 2026-05-30','live demo'),
+                   ('1_A009','Data Set Date'):('TEXT : dd/mm/yyyy','PARSE_DATE → ISO','"30/05/2026" → 2026-05-30','live demo')}
+rows=[]
+for s in order:
+    df=datemap.get(s,'(none)')
+    if df and df!='(none)':
+        ov=date_fmt_override.get((s,df))
+        if ov: rows.append((s,df,"Date",ov[0],ov[1],"ISO yyyy-mm-dd (แสดง dd/mm/yyyy)",ov[2],ov[3]))
+        else:  rows.append((s,df,"Date","DATE ⚠️","PARSE_DATE → ISO","ISO yyyy-mm-dd (แสดง dd/mm/yyyy)","— → 2026-05-30","ยืนยัน format จริงของไฟล์"))
+# number / sign rows (representative)
+num_rows=[
+ ("2_D001","RCV_INIT_PRINCIPAL","Number","NUMBER (อาจติดลบ)","ABS","ตัวเลข ≥ 0","-1,000,000 → 1,000,000","ตัด sign ก่อนเทียบ"),
+ ("1_A009","Initial Buy Amount","Number","NUMBER (อาจติดลบ)","ABS","ตัวเลข ≥ 0","-1,000,000 → 1,000,000","ตัด sign ก่อนเทียบ"),
+ ("4_C001","Amount","Number","NUMBER","SIGN_BY(\"DR/CR\", DR=+1, CR=-1)","ตัวเลขมีเครื่องหมาย","100 (CR) → -100","sign มาจากคอลัมน์ DR/CR"),
+ ("2_D003","Amount","Number","NUMBER","SIGN_BY(\"Pay/Rcv\", Rcv=+1, Pay=-1)","ตัวเลขมีเครื่องหมาย","100 (Pay) → -100","sign มาจาก Pay/Rcv"),
+ ("1_A008","Transaction Amount","Number","NUMBER","SIGN_BY(\"Receive Payment Type\")","ตัวเลขมีเครื่องหมาย","ตาม type","ระบุ map ค่า type → sign"),
+ ("(any)","Amount (paren)","Number","TEXT : (123)","PAREN_NEG","ตัวเลขมีเครื่องหมาย","\"(100)\" → -100","วงเล็บ = ค่าลบ"),
+ ("(any)","Amount (str)","Number","TEXT : \"1,000.00\"","STRIP(\",$ \") + DEC(2)","ตัวเลข","\"1,000.00\" → 1000","ตัดคั่นหลักพัน/สัญลักษณ์"),
+]
+allrows=rows+num_rows
+r=5
+for s,f,role_,sf,nr,ca,ex,nt in allrows:
+    vals=[s,f,role_,sf,nr,ca,ex,nt]
+    for i,v in enumerate(vals): st(ws.cell(r,i+1,v),bd=True,sz=9,h="center" if i in(2,) else "left")
+    ws.cell(r,4).fill=PatternFill("solid",fgColor=INPUT); ws.cell(r,5).fill=PatternFill("solid",fgColor=INPUT)  # editable config
+    if role_=="Date": st(ws.cell(r,3),color="2E75B6",b=True)
+    else: st(ws.cell(r,3),color="538135",b=True)
+    r+=1
+flast=r-1
+for i,w in enumerate([12,24,11,22,30,26,26,26]): ws.column_dimensions[get_column_letter(i+1)].width=w
+r+=1
+ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=8)
+st(ws.cell(r,1,'Date Source Format tokens:  DATE | NUMBER:yyyymmdd | NUMBER:ddmmyyyy | TEXT:dd/mm/yyyy | TEXT:mm/dd/yyyy | TEXT:yyyy-mm-dd | TEXT:dd-mmm-yy | TEXT:dd-mmm-yyyy'),
+   b=True,sz=9,color=NAVY,fill=YELLOW,wrap=True); ws.row_dimensions[r].height=26; r+=1
+ws.merge_cells(start_row=r,start_column=1,end_row=r,end_column=8)
+st(ws.cell(r,1,'Number Normalization tokens:  RAW | ABS | NEG | SIGN_BY("field",map) | PAREN_NEG | TRAIL_NEG | STRIP("chars") | DEC(n) | ROUND(n)        '
+              'หมายเหตุ: yy → ปี (pivot 20yy ถ้า yy<50) , mmm = ชื่อเดือนอังกฤษ (Jan..Dec)'),
+   b=True,sz=9,color=NAVY,fill=YELLOW,wrap=True); ws.row_dimensions[r].height=30
+
 # ============================================================ OPEN QUESTIONS
 ws=wb.create_sheet("Open_Questions")
 title(ws,"OPEN QUESTIONS  —  สิ่งที่ยืนยันแล้ว & ที่ยังรอข้อมูล",
@@ -322,13 +385,14 @@ qs=[("1","Key mapping ข้ามไฟล์","✓ คีย์ธุรกิ
 ("5","Pattern/Compare ต่อ Set","⧖ ค่าใน Recon_Rules เป็น default โปรดยืนยัน/แก้ (โดยเฉพาะ Set ที่ตั้ง Pattern 2/3)",YELLOW),
 ("6","Key Prep rule จริงต่อ Source","⧖ ต้องการรูปแบบคีย์ดิบจริงของแต่ละไฟล์ (โดยเฉพาะที่ต้อง Prep) เพื่อเขียน DSL ให้ตรง",YELLOW),
 ("7","Pattern 3 back-check","⧖ ระบุว่าย้อนไปตรวจ field ใดที่ Main Source (เช่น D2-5→2_D001, O1-3→3_O003, C1-2→4_C003)",YELLOW),
-("8","ข้อมูลตัวอย่างจริง","⧖ ขอไฟล์จริง 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine (Excel/Power Query/Python) ให้รันครบทุก Set",YELLOW)]
+("8","Date/Number Format ต่างกัน","✓ มีชีท Field_Format จัดการ Normalize (Date→ISO/dd/mm/yyyy, Number→ABS/SIGN_BY) — แต่ต้องยืนยัน format ดิบจริงต่อ field",GREEN),
+("9","ข้อมูลตัวอย่างจริง","⧖ ขอไฟล์จริง 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine (Excel/Power Query/Python) ให้รันครบทุก Set",YELLOW)]
 r=5
 for n,q,a,col in qs:
     st(ws.cell(r,2,n),b=True,bd=True,h="center"); st(ws.cell(r,3,q),wrap=True,bd=True,sz=9)
     st(ws.cell(r,4,a),wrap=True,bd=True,sz=9,fill=col); ws.row_dimensions[r].height=42; r+=1
 
-order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Recon_Detail","Sample_Data","Map_Config","Source_Config","Open_Questions"]
+order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Recon_Detail","Sample_Data","Field_Format","Map_Config","Source_Config","Open_Questions"]
 wb._sheets.sort(key=lambda s: order_sheets.index(s.title))
 wb.calculation.fullCalcOnLoad=True
 wb.save("Part_Reconcile_Tool_Prototype.xlsx")

@@ -125,7 +125,8 @@ line("    Control_Panel (กรอกเหลือง) → Recon_Rules (กำ
 r+=1
 line("6)  คำอธิบายสี (Legend)",b=True,sz=12,color=NAVY)
 for txt,fl,co in [("ช่องกรอก/แก้ไข (Input/Config)",INPUT,"000000"),("OK / ตรงกัน",GREEN,GREENT),
-                  ("MISSING in A1 (บันทึกขาด)",RED,REDT),("EXTRA in A1 (บันทึกเกิน)",RED,REDT),("VALUE MISMATCH (ค่าไม่ตรง)",ORANGE,ORANGET)]:
+                  ("MISSING in A1 (บันทึกขาด)",RED,REDT),("EXTRA in A1 (บันทึกเกิน)",RED,REDT),
+                  ("DUPLICATE KEY (คีย์ซ้ำ — ผิด Trans.Map 1:1)",RED,REDT),("VALUE MISMATCH (ค่าไม่ตรง)",ORANGE,ORANGET)]:
     st(ws.cell(r,2,"  "),fill=fl,bd=True); st(ws.cell(r,3,txt),color=co,b=True); r+=1
 ws.sheet_view.showGridLines=False
 
@@ -149,18 +150,26 @@ for lab,val,desc in inputs:
 wb.defined_names.add(DefinedName("ChkDate",attr_text=names["Data Transaction Date"]))
 wb.defined_names.add(DefinedName("Tol",attr_text=names["Amount tolerance"]))
 r+=1
-st(ws.cell(r,2,"สถานะรวม (ดู Recon_Summary)"),b=True,sz=12,color=NAVY); r+=1
-st(ws.cell(r,2,"จำนวน Set ที่พบ Error"),b=True,bd=True)
-ws.cell(r,3,f'=COUNTIF(Recon_Summary!$I$5:$I${4+len(sets)},"ERROR*")'); st(ws.cell(r,3),bd=True,h="center",b=True)
+# dropdown: Product to run (row 7 = 3rd input)
+dv=DataValidation(type="list",formula1='"D,O,C,ALL"',allow_blank=False)
+ws.add_data_validation(dv); dv.add(ws.cell(7,3))
+st(ws.cell(r,2,"สถานะรวม (Overall KPI — อ้างอิง Recon_Summary)"),b=True,sz=12,color=NAVY); r+=1
+SUMST=f"Recon_Summary!$K$5:$K${4+len(sets)}"
+for lab,fm,fl in [("Set ทั้งหมด",f'=COUNTA(Recon_Summary!$A$5:$A${4+len(sets)})',GREY),
+                  ("Set ผ่าน (OK)",f'=COUNTIF({SUMST},"OK")',GREEN),
+                  ("Set พบ Error",f'=COUNTIF({SUMST},"ERROR*")',RED),
+                  ("Set รอข้อมูล (Pending)",f'=COUNTIF({SUMST},"Pending*")',YELLOW)]:
+    st(ws.cell(r,2,lab),b=True,bd=True)
+    ws.cell(r,3,fm); st(ws.cell(r,3),bd=True,h="center",b=True,fill=fl); r+=1
 
 # ============================================================ RECON SUMMARY
 ws=wb.create_sheet("Recon_Summary")
 title(ws,"RECON SUMMARY  —  Dashboard สรุปทุก Set (21 Sets)",
       "หนึ่งแถว/Set | สีแดง = พบ Error ต้องแก้ | Pattern = วิธีจับคู่ | Set D1-1 คำนวณสดจาก Sample_Data, Set อื่น = Pending (รอโหลดข้อมูล)",10)
 ws.sheet_view.showGridLines=False
-hdr(ws,4,["Product","Cat","Set","Chain (Database ⇄ A1_System)","Trans.Map","Pattern","MISSING in A1","EXTRA in A1","VALUE MISMATCH","Overall Status"])
+hdr(ws,4,["Product","Cat","Set","Chain (Database ⇄ A1_System)","Trans.Map","Pattern","MISSING in A1","EXTRA in A1","VALUE MISMATCH","DUP KEY","Overall Status"])
 ws.freeze_panes="A5"
-DET_LAST=10  # Recon_Detail data rows 6..10
+DET_LAST=11  # Recon_Detail data rows 6..11
 r=5
 for p,cat,no,chain,tm,pat,mk,cmp,cond,bc in sets:
     for i,v in enumerate([p,cat,no," ⇄ ".join(chain),tm,pat]):
@@ -169,16 +178,17 @@ for p,cat,no,chain,tm,pat,mk,cmp,cond,bc in sets:
         ws.cell(r,7,f'=COUNTIF(Recon_Detail!$K$6:$K${DET_LAST},"MISSING in A1")')
         ws.cell(r,8,f'=COUNTIF(Recon_Detail!$K$6:$K${DET_LAST},"EXTRA in A1")')
         ws.cell(r,9,f'=COUNTIF(Recon_Detail!$K$6:$K${DET_LAST},"VALUE MISMATCH")')
-        ws.cell(r,10,f'=IF(SUM(G{r}:I{r})=0,"OK","ERROR — "&SUM(G{r}:I{r})&" รายการ")')
-        for cc in range(7,11): st(ws.cell(r,cc),bd=True,h="center",b=(cc==10))
+        ws.cell(r,10,f'=COUNTIF(Recon_Detail!$K$6:$K${DET_LAST},"DUPLICATE*")')
+        ws.cell(r,11,f'=IF(SUM(G{r}:J{r})=0,"OK","ERROR — "&SUM(G{r}:J{r})&" รายการ")')
+        for cc in range(7,12): st(ws.cell(r,cc),bd=True,h="center",b=(cc==11))
     else:
-        for cc in range(7,10): st(ws.cell(r,cc,"-"),bd=True,h="center")
-        st(ws.cell(r,10,"Pending data"),bd=True,h="center",color="808080")
+        for cc in range(7,11): st(ws.cell(r,cc,"-"),bd=True,h="center")
+        st(ws.cell(r,11,"Pending data"),bd=True,h="center",color="808080")
     r+=1
 slast=r-1
-for col,w in zip("ABCDEFGHIJ",[8,6,5,38,13,15,13,12,15,18]): ws.column_dimensions[col].width=w
-ws.conditional_formatting.add(f"J5:J{slast}",FormulaRule(formula=['$J5="OK"'],fill=PatternFill("solid",fgColor=GREEN),font=Font(name=F,color=GREENT,bold=True)))
-ws.conditional_formatting.add(f"J5:J{slast}",FormulaRule(formula=['LEFT($J5,5)="ERROR"'],fill=PatternFill("solid",fgColor=RED),font=Font(name=F,color=REDT,bold=True)))
+for col,w in zip("ABCDEFGHIJK",[8,6,5,38,13,15,13,12,15,10,18]): ws.column_dimensions[col].width=w
+ws.conditional_formatting.add(f"K5:K{slast}",FormulaRule(formula=['$K5="OK"'],fill=PatternFill("solid",fgColor=GREEN),font=Font(name=F,color=GREENT,bold=True)))
+ws.conditional_formatting.add(f"K5:K{slast}",FormulaRule(formula=['LEFT($K5,5)="ERROR"'],fill=PatternFill("solid",fgColor=RED),font=Font(name=F,color=REDT,bold=True)))
 
 # ============================================================ RECON RULES (engine spec)
 ws=wb.create_sheet("Recon_Rules")
@@ -259,7 +269,8 @@ st(ws.cell(4,2,"ตาราง A : Database 2_D001  (TRADE_DATE = NUMBER yyyymm
 hdr(ws,5,["TRADE_REF (Key)","CCY","Amount (raw)","TRADE_DATE (raw)","Norm Amt (ABS)","Norm Date (ISO)"],start=2,fill="A9D08E",color="000000")
 # (key, ccy, amount_raw, date_raw_num)
 db_rows=[("C0001","USD",1000000,20260530),("C0002","USD",2000000,20260530),
-         ("C0003","EUR",1500000,20260530),("C0004","JPY",3000000,20260530)]
+         ("C0003","EUR",1500000,20260530),("C0004","JPY",3000000,20260530),
+         ("C0006","USD",500000,20260530)]
 r=6
 for k,c,a,d in db_rows:
     st(ws.cell(r,2,k),bd=True); st(ws.cell(r,3,c),bd=True,h="center")
@@ -277,7 +288,9 @@ hdr(ws,5,["Raw Key","CCY","Amount (raw)","Date (raw text)","Prepped Key","Norm A
 a1_rows=[("KT20260530C0001","USD",-1000000,"30/05/2026"),  # sign- & date-format differ -> still OK after normalize
          ("KT20260530C0002","USD", 2050000,"30/05/2026"),  # amount truly differs -> MISMATCH
          ("KT20260530C0003","EUR", 1500000,"29/05/2026"),  # date truly differs -> MISMATCH
-         ("KT20260530C0005","GBP",  800000,"30/05/2026")]  # extra
+         ("KT20260530C0005","GBP",  800000,"30/05/2026"),  # extra
+         ("KT20260530C0006","USD",  500000,"30/05/2026"),  # duplicate key in A1 (recorded twice)
+         ("KT20260530C0006","USD",  500000,"30/05/2026")]
 r=6
 for k,c,a,d in a1_rows:
     st(ws.cell(r,9,k),bd=True); st(ws.cell(r,10,c),bd=True,h="center")
@@ -290,8 +303,9 @@ for k,c,a,d in a1_rows:
     r+=1
 a1_last=r-1
 note=('Normalize ก่อนเทียบ:  C0001 = OK (DB amt 1,000,000 vs A1 -1,000,000 → ABS ตรง; วันที่คนละ format → ISO ตรง)  |  '
-      'C0002 = MISMATCH(Amount จริง)  |  C0003 = MISMATCH(Date จริง 29 vs 30)  |  C0004 = MISSING in A1  |  C0005 = EXTRA in A1')
-ws.merge_cells("B12:O13"); st(ws.cell(12,2,note),wrap=True,color="9C5700",fill=YELLOW,bd=True)
+      'C0002 = MISMATCH(Amount จริง)  |  C0003 = MISMATCH(Date จริง 29 vs 30)  |  C0004 = MISSING in A1  |  C0005 = EXTRA in A1  |  '
+      'C0006 = DUPLICATE in A1 (บันทึกซ้ำ 2 ครั้ง — ผิด Trans.Map 1:1)')
+ws.merge_cells("B13:O14"); st(ws.cell(13,2,note),wrap=True,color="9C5700",fill=YELLOW,bd=True)
 for col,w in zip("BCDEFGHIJKLMNO",[15,7,13,14,13,13,3,16,7,13,13,11,13,13]): ws.column_dimensions[col].width=w
 # canonical ranges used by Recon_Detail (compare on NORMALIZED columns)
 DBK=f"Sample_Data!$B$6:$B${db_last}"; DBC=f"Sample_Data!$C$6:$C${db_last}"; DBA=f"Sample_Data!$F$6:$F${db_last}"; DBD=f"Sample_Data!$G$6:$G${db_last}"
@@ -304,7 +318,7 @@ title(ws,"RECON DETAIL  —  Set D1-1 (Pattern 1) | จับคู่ Prepped K
 ws.sheet_view.showGridLines=False
 hdr(ws,5,["Match Key","In DB?","In A1?","DB CCY","A1 CCY","DB Amount (norm)","A1 Amount (norm)","DB Date (dd/mm/yyyy)","A1 Date (dd/mm/yyyy)","Field Diff","Result / Status","ERROR Message (→ fix in A1_System)"])
 ws.freeze_panes="B6"
-union=["C0001","C0002","C0003","C0004","C0005"]
+union=["C0001","C0002","C0003","C0004","C0005","C0006"]
 r=6
 for k in union:
     R=r
@@ -319,12 +333,15 @@ for k in union:
     ws.cell(R,9,f'=IFERROR(TEXT(DATEVALUE(INDEX({A1D},MATCH(A{R},{A1K},0))),"dd/mm/yyyy"),"")')
     # field diff only meaningful when both present
     ws.cell(R,10,(f'=IF(AND(B{R}="YES",C{R}="YES"),TRIM(IF(D{R}<>E{R},"CCY ","")&IF(ABS(F{R}-G{R})>Tol,"Amount ","")&IF(H{R}<>I{R},"Date ","")),"")'))
-    ws.cell(R,11,(f'=IF(AND(B{R}="YES",C{R}="NO"),"MISSING in A1",'
+    ws.cell(R,11,(f'=IF(COUNTIF({A1K},A{R})>1,"DUPLICATE in A1",'
+                  f'IF(COUNTIF({DBK},A{R})>1,"DUPLICATE in DB",'
+                  f'IF(AND(B{R}="YES",C{R}="NO"),"MISSING in A1",'
                   f'IF(AND(B{R}="NO",C{R}="YES"),"EXTRA in A1",'
-                  f'IF(J{R}<>"","VALUE MISMATCH","OK / Matched")))'))
-    ws.cell(R,12,(f'=IF(K{R}="MISSING in A1","มีใน Database แต่ขาดใน A1_System — บันทึกเพิ่มที่ A1_System",'
+                  f'IF(J{R}<>"","VALUE MISMATCH","OK / Matched")))))'))
+    ws.cell(R,12,(f'=IF(LEFT(K{R},9)="DUPLICATE","Key ซ้ำ (A1="&COUNTIF({A1K},A{R})&" / DB="&COUNTIF({DBK},A{R})&" รายการ) — ตรวจสอบ/ลบรายการซ้ำก่อน Reconcile",'
+                  f'IF(K{R}="MISSING in A1","มีใน Database แต่ขาดใน A1_System — บันทึกเพิ่มที่ A1_System",'
                   f'IF(K{R}="EXTRA in A1","พบใน A1_System แต่ไม่มีใน Database — ตรวจ/ลบรายการเกินที่ A1_System",'
-                  f'IF(K{R}="VALUE MISMATCH","ค่าไม่ตรง ["&J{R}&"] DB(CCY="&D{R}&",Amt="&TEXT(F{R},"#,##0")&",Dt="&H{R}&") vs A1(CCY="&E{R}&",Amt="&TEXT(G{R},"#,##0")&",Dt="&I{R}&") — แก้ที่ A1_System","")))'))
+                  f'IF(K{R}="VALUE MISMATCH","ค่าไม่ตรง ["&J{R}&"] DB(CCY="&D{R}&",Amt="&TEXT(F{R},"#,##0")&",Dt="&H{R}&") vs A1(CCY="&E{R}&",Amt="&TEXT(G{R},"#,##0")&",Dt="&I{R}&") — แก้ที่ A1_System",""))))'))
     for c in range(2,12): st(ws.cell(R,c),bd=True,h="center" if c in(2,3) else ("right" if c in(6,7) else "left"))
     ws.cell(R,6).number_format="#,##0"; ws.cell(R,7).number_format="#,##0"
     st(ws.cell(R,11),bd=True,b=True,h="center"); st(ws.cell(R,12),bd=True,wrap=True,color=REDT)
@@ -335,6 +352,27 @@ rng=f"A6:L{last}"
 ws.conditional_formatting.add(rng,FormulaRule(formula=['$K6="OK / Matched"'],fill=PatternFill("solid",fgColor=GREEN),font=Font(name=F,color=GREENT)))
 ws.conditional_formatting.add(rng,FormulaRule(formula=['OR($K6="EXTRA in A1",$K6="MISSING in A1")'],fill=PatternFill("solid",fgColor=RED),font=Font(name=F,color=REDT,bold=True)))
 ws.conditional_formatting.add(rng,FormulaRule(formula=['$K6="VALUE MISMATCH"'],fill=PatternFill("solid",fgColor=ORANGE),font=Font(name=F,color=ORANGET,bold=True)))
+ws.conditional_formatting.add(rng,FormulaRule(formula=['LEFT($K6,9)="DUPLICATE"'],fill=PatternFill("solid",fgColor=RED),font=Font(name=F,color=REDT,bold=True)))
+
+# ============================================================ EXPORT 1B (write-back preview)
+ws=wb.create_sheet("Export_1B")
+title(ws,"EXPORT 1B  —  ตัวอย่างผลลัพธ์ที่จะเขียนกลับไฟล์ 1_B009  (Set D1-1)",
+      "รูปแบบตรงกับไฟล์ 1_Bxxx จริง: [Key , ERROR Message]  |  ดึงเฉพาะรายการที่เป็น Error จาก Recon_Detail (แถวว่าง = ไม่มี Error, engine จริงจะ export เฉพาะแถวที่ไม่ว่าง)",3)
+ws.sheet_view.showGridLines=False
+hdr(ws,4,["Fi Arrangement Number (Key)","ERROR Message"],start=2)
+r=5
+for i in range(6,12):
+    ws.cell(r,2,f'=IF(OR(Recon_Detail!K{i}="OK / Matched",Recon_Detail!K{i}=""),"",Recon_Detail!A{i})')
+    ws.cell(r,3,f'=IF(OR(Recon_Detail!K{i}="OK / Matched",Recon_Detail!K{i}=""),"",Recon_Detail!L{i})')
+    st(ws.cell(r,2),bd=True,b=True); st(ws.cell(r,3),bd=True,wrap=True,color=REDT)
+    r+=1
+elast=r-1
+ws.column_dimensions["A"].width=3; ws.column_dimensions["B"].width=26; ws.column_dimensions["C"].width=95
+ws.conditional_formatting.add(f"B5:C{elast}",FormulaRule(formula=['$B5<>""'],fill=PatternFill("solid",fgColor=RED)))
+r+=1
+ws.merge_cells(start_row=r,start_column=2,end_row=r,end_column=3)
+st(ws.cell(r,2,"จำนวนรายการที่จะ Export:"),b=True)
+ws.cell(r,4,f'=COUNTIF(B5:B{elast},"?*")'); st(ws.cell(r,4),b=True,h="center",fill=YELLOW,bd=True)
 
 # ============================================================ MAP CONFIG
 ws=wb.create_sheet("Map_Config")
@@ -444,7 +482,7 @@ for n,q,a,col in qs:
     st(ws.cell(r,2,n),b=True,bd=True,h="center"); st(ws.cell(r,3,q),wrap=True,bd=True,sz=9)
     st(ws.cell(r,4,a),wrap=True,bd=True,sz=9,fill=col); ws.row_dimensions[r].height=42; r+=1
 
-order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Mapping_Steps","Recon_Detail","Sample_Data","Field_Format","Map_Config","Source_Config","Open_Questions"]
+order_sheets=["README","Control_Panel","Recon_Summary","Recon_Rules","Mapping_Steps","Recon_Detail","Export_1B","Sample_Data","Field_Format","Map_Config","Source_Config","Open_Questions"]
 wb._sheets.sort(key=lambda s: order_sheets.index(s.title))
 wb.calculation.fullCalcOnLoad=True
 wb.save("Part_Reconcile_Tool_Prototype.xlsx")

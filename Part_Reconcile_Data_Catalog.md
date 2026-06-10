@@ -16,6 +16,7 @@
 5. [หมวด D — Reconcile Rules (กฎการจับคู่)](#หมวด-d--reconcile-rules-กฎการจับคู่)
 6. [หมวด E — Normalization (Date & Number)](#หมวด-e--normalization-date--number)
 7. [หมวด F — มาตรฐานคำศัพท์ & DSL](#หมวด-f--มาตรฐานคำศัพท์--dsl)
+8. [หมวด G — Data Quality & Pre-checks](#หมวด-g--data-quality--pre-checks)
 
 ---
 
@@ -337,7 +338,10 @@ Step4  Result: Reconcile          │  Return: Reconcile  → เขียนผ
 | `OK / Matched` | 🟢 เขียว | ตรงกันทุก field |
 | `MISSING in A1` | 🔴 แดง | มีใน DB ไม่มีใน A1 → บันทึกเพิ่มที่ A1 |
 | `EXTRA in A1` | 🔴 แดง | มีใน A1 ไม่มีใน DB → ตรวจ/ลบที่ A1 |
+| `DUPLICATE in A1 / DB` | 🔴 แดง | Key ซ้ำหลายแถวฝั่งใดฝั่งหนึ่ง — ผิด Trans.Map 1:1 → ตรวจ/ลบรายการซ้ำก่อน Reconcile |
 | `VALUE MISMATCH` | 🟠 ส้ม | Key ตรง แต่ CCY/Amount/Date ต่าง → แก้ค่าที่ A1 |
+
+> ลำดับการตรวจ: **DUPLICATE ก่อนเสมอ** (ถ้า key ซ้ำ ผล MISSING/EXTRA/MISMATCH จะเชื่อถือไม่ได้) → จากนั้น MISSING/EXTRA → สุดท้าย VALUE MISMATCH
 
 ### F.3 อภิธานศัพท์
 | คำ | ความหมาย |
@@ -354,12 +358,47 @@ Step4  Result: Reconcile          │  Return: Reconcile  → เขียนผ
 
 ---
 
+## หมวด G — Data Quality & Pre-checks
+
+> ก่อนรัน Reconcile ทุกครั้ง Engine ควรตรวจคุณภาพข้อมูลขั้นต้นก่อน — ถ้า Pre-check ไม่ผ่าน ผลการ Reconcile จะเชื่อถือไม่ได้
+
+### G.1 Pre-checks ต่อไฟล์ (รันก่อน Step1)
+
+| # | ตรวจอะไร | เกณฑ์ | ถ้าไม่ผ่าน |
+|:-:|----------|-------|------------|
+| 1 | ไฟล์ครบตามชุดที่ Set ต้องใช้ | ทุก Source ใน chain มีไฟล์ | หยุด Set นั้น + แจ้ง "FILE MISSING" |
+| 2 | จำนวนแถวหลัง Filter > 0 | มี Transaction ในวันที่ตรวจ | แจ้งเตือน "NO DATA for date" (อาจปกติถ้าวันนั้นไม่มีรายการ) |
+| 3 | Key ว่าง/null | ทุกแถวต้องมี Key | แยกแถวออก + รายงาน "BLANK KEY" |
+| 4 | **Key ซ้ำ (Duplicate)** | Key ไม่ซ้ำตาม Trans.Map 1:1 | สถานะ `DUPLICATE in A1/DB` — ตรวจซ้ำก่อนเทียบ |
+| 5 | Date แปลงไม่ได้ (unparseable) | ทุกค่าแปลงเป็น ISO ได้ | รายงาน "BAD DATE FORMAT" + ระบุแถว |
+| 6 | Number แปลงไม่ได้ | ทุกค่าเป็นตัวเลขหลัง normalize | รายงาน "BAD NUMBER FORMAT" + ระบุแถว |
+
+### G.2 ผลลัพธ์ Export กลับ 1_B (ชีท `Export_1B`)
+- รูปแบบตรงกับไฟล์ `1_Bxxx` จริง: **`[Key , ERROR Message]`**
+- Export **เฉพาะรายการที่เป็น Error** (OK ไม่ต้องส่ง)
+- 1 Key อาจมีหลาย Error จากหลาย Set → production ควรรวมเป็น 1 แถวต่อ (Key, Set) หรือ concat ข้อความ — **รอยืนยันรูปแบบที่ A1_System ต้องการ**
+
+---
+
+### 📝 Changelog
+
+| Version | สิ่งที่เพิ่ม/แก้ |
+|---------|------------------|
+| v0.1 | โครง prototype: 2 มุมมอง Reconcile + Dashboard 21 Sets + Demo Set D1-1 |
+| v0.2 | Recon_Rules (3 Match Patterns), Key Prep DSL, composite key, เทียบ CCY+Amount+Date |
+| v0.3 | Normalization layer (Field_Format): Date ทุก format → ISO, Number → ABS/SIGN_BY |
+| v0.4 | Mapping_Steps: กระบวนการ 4 Step ต่อคู่ Main ⇄ Map File |
+| v0.5 | ตรวจ DUPLICATE KEY, ชีท Export_1B (write-back preview), KPI สรุปใน Control_Panel, dropdown Product, แก้บั๊กสูตรนับ Error ชี้ผิดคอลัมน์ |
+
+---
+
 ### ⧖ รายการรอยืนยัน (ดูชีท `Open_Questions` ในไฟล์ Excel)
 1. **Pattern/Compare ต่อ Set** (โดยเฉพาะที่ติด ⚠️) — โปรดยืนยัน/แก้
 2. **Key Prep rule จริงต่อ Source** — ต้องการรูปแบบคีย์ดิบจริงของไฟล์ที่ต้อง prep
 3. **Pattern 3 Back-check** — ระบุว่าย้อนไปตรวจ field ใดที่ Main Source
 4. **Date/Number Format ดิบจริงต่อ field** — ยืนยันใน `Field_Format` (Source Format + Normalization Rule) โดยเฉพาะวันที่แบบ `dd-mmm-yy` และเลขที่ sign มาจากคอลัมน์อื่น
-5. **ข้อมูลตัวอย่างจริง** 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine ให้รันครบทุก Set
+5. **รูปแบบ Export กลับ 1_B** — 1 Key หลาย Error ควรรวมข้อความหรือแยกแถว (ดู G.2)
+6. **ข้อมูลตัวอย่างจริง** 1-2 ไฟล์ เพื่อ map คอลัมน์ + เขียน engine ให้รันครบทุก Set
 
 ---
 *สร้างจาก `MockUp_File.xlsx` — ใช้คู่กับ `Part_Reconcile_Tool_Prototype.xlsx`*
